@@ -1,0 +1,15 @@
+services:
+  plex-jav-provider:
+    build: .
+    container_name: plex-jav-provider
+    ports:
+      - "8800:8800"
+    volumes:
+      - jav_data:/data
+    environment:
+      - DATA_DIR=/data
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+volumes:
+  jav_data:
