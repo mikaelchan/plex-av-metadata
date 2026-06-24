@@ -16,7 +16,9 @@ RUN sed -i "s@deb.debian.org@$APT_MIRROR@g" /etc/apt/sources.list.d/debian.sourc
     rm -rf /var/lib/apt/lists/*
 
 COPY . /app/
-RUN pip install --no-cache-dir -i $PIP_MIRROR poetry &&     poetry config virtualenvs.create false &&     poetry install --no-dev &&     pip install --no-cache-dir -i $PIP_MIRROR fastapi uvicorn httpx
+RUN pip install --no-cache-dir -i $PIP_MIRROR poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --no-dev
 
 RUN mkdir -p /data
 
