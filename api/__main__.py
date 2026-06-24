@@ -1,10 +1,5 @@
 """
 Plex JAV Metadata Provider — Plex Metadata Agent HTTP 服务
-
-协议：
-  GET  /              → MediaProvider 根声明
-  GET  /metadata/{id} → Metadata 对象
-  POST /match         → Match 搜索（JSON body）
 """
 
 import os
@@ -39,9 +34,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
 
 @app.get("/")
 async def root(request: Request):
-    """Provider 声明。Plex 以此发现 provider 的 capabilities。"""
+    """Provider 声明"""
     accept = request.headers.get("accept", "*/*").lower()
-
     provider = {
         "MediaProvider": {
             "identifier": PROVIDER_ID,
@@ -57,37 +51,29 @@ async def root(request: Request):
             ],
         }
     }
-
     if "xml" in accept or "*/*" in accept:
-        return Response(
-            content=_render_xml(provider["MediaProvider"]),
-            media_type="application/xml",
-        )
+        return Response(content=_render_xml(provider["MediaProvider"]), media_type="application/xml")
     return provider
 
 
 def _render_xml(provider: dict) -> str:
-    """将 MediaProvider 渲染为 Plex 兼容的 XML"""
-    types_xml = ""
+    types_parts = []
     for t in provider.get("Types", []):
-        schemes = "".join(
-            f"<Scheme>{s['scheme']}</Scheme>" for s in t.get("Scheme", [])
-        )
-        types_xml += f'<Type type="{t["type"]}">{schemes}</Type>'
-
-    features_xml = "".join(
-        f'<Feature type="{f["type"]}" key="{f["key"]}"/>'
-        for f in provider.get("Feature", [])
-    )
-
+        schemes = "".join(f"<Scheme>{s['scheme']}</Scheme>" for s in t.get("Scheme", []))
+        types_parts.append(f'<Type type="{t["type"]}">{schemes}</Type>')
+    types_xml = "".join(types_parts)
+    features_parts = []
+    for f in provider.get("Feature", []):
+        features_parts.append(f'<Feature type="{f["type"]}" key="{f["key"]}"/>')
+    features_xml = "".join(features_parts)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<MediaProvider>\n"
-        f"  <Identifier>{provider['identifier']}</Identifier>\n"
-        f"  <Title>{provider['title']}</Title>\n"
-        f"  <Version>{provider.get('version', '')}</Version>\n"
-        f"  {types_xml}\n"
-        f"  {features_xml}\n"
+        f'  <Identifier>{provider['identifier']}</Identifier>\n'
+        f'  <Title>{provider['title']}</Title>\n'
+        f'  <Version>{provider.get('version', '')}</Version>\n'
+        f'  {types_xml}\n'
+        f'  {features_xml}\n'
         "</MediaProvider>"
     )
 
@@ -102,13 +88,9 @@ async def get_metadata(rating_key: str):
     result = scrape_number(number, DATA_DIR)
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=f"Not found: {number}")
-
     return {
-        "MediaContainer": {
-            "offset": 0, "totalSize": 1,
-            "identifier": PROVIDER_ID, "size": 1,
-            "Metadata": [_build_metadata(result)],
-        }
+        "MediaContainer": {"offset": 0, "totalSize": 1, "identifier": PROVIDER_ID, "size": 1,
+                           "Metadata": [_build_metadata(result)]}
     }
 
 
@@ -118,33 +100,10 @@ async def get_metadata(rating_key: str):
 
 @app.post("/match")
 async def match(body: dict = Body(...)):
-    """Plex 搜索匹配，POST JSON body"""
-    title = body.get("title", "")
-    filename = body.get("filename", "")
-    guid = body.get("guid", "")
-
-    # 从 title / filename / guid 中提取番号
-    number = None
-    for src in [title, filename, guid]:
-        s = str(src).strip()
-        if not s:
-            continue
-        # 标准番号: ABW-005, FC2-1234567
-        m = re.search(r"([A-Za-z]{2,6}-?\d{2,7})", s.upper())
-        if m:
-            number = m.group(1)
-            break
-        # 纯数字番号（1Pondo 格式）: 010116, 010116_220
-        # 1Pondo 格式: 010116 220 或 010116_220
-        m = re.search(r"(\d{6})[ _](\d{2,3})", s)
-        if m:
-            number = m.group(1) + "_" + m.group(2)
-            break
-        # 也尝试纯6位数字
-        m = re.search(r"(\d{6})", s)
-        if m:
-            number = m.group(1)
-            break
+    """Plex 搜索匹配"""
+    number = _extract_number(body.get("title", "")) \
+             or _extract_number(body.get("filename", "")) \
+             or _extract_number(body.get("guid", ""))
 
     if not number:
         return {"MediaContainer": {"offset": 0, "totalSize": 0, "size": 0, "Metadata": []}}
@@ -154,27 +113,21 @@ async def match(body: dict = Body(...)):
         return {"MediaContainer": {"offset": 0, "totalSize": 0, "size": 0, "Metadata": []}}
 
     return {
-        "MediaContainer": {
-            "offset": 0, "totalSize": 1,
-            "identifier": PROVIDER_ID, "size": 1,
-            "Metadata": [_build_metadata(result)],
-        }
+        "MediaContainer": {"offset": 0, "totalSize": 1, "identifier": PROVIDER_ID, "size": 1,
+                           "Metadata": [_build_metadata(result)]}
     }
 
 
 # ══════════════════════════════════════════════════════════════
-# 手动刮削端点
+# 辅助
 # ══════════════════════════════════════════════════════════════
 
 @app.get("/health")
 async def health():
     import importlib.util
     javsp_ok = importlib.util.find_spec("javsp") is not None
-    return {
-        "status": "ok", "version": VERSION,
-        "provider": PROVIDER_ID,
-        "engine": "javsp" if javsp_ok else "built-in",
-    }
+    return {"status": "ok", "version": VERSION, "provider": PROVIDER_ID,
+            "engine": "javsp" if javsp_ok else "built-in"}
 
 
 @app.get("/scrape/{number}")
@@ -190,10 +143,8 @@ async def scrape_nfo(number: str):
     result = scrape_number(number.upper(), DATA_DIR)
     if not result.get("nfo"):
         raise HTTPException(status_code=404)
-    return PlainTextResponse(
-        content=result["nfo"], media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{result["nfo_filename"]}"'},
-    )
+    return PlainTextResponse(content=result["nfo"], media_type="application/xml",
+                             headers={"Content-Disposition": f'attachment; filename="{result["nfo_filename"]}"'})
 
 
 @app.get("/scrape/{number}/cover")
@@ -205,6 +156,44 @@ async def scrape_cover(number: str):
         return RedirectResponse(url=result["cover_url"])
     raise HTTPException(status_code=404)
 
+
+# ══════════════════════════════════════════════════════════════
+# 番号提取
+# ══════════════════════════════════════════════════════════════
+
+def _extract_number(raw: str) -> str | None:
+    """从 Plex 传过来的 title/filename/guid 中提取番号"""
+    s = str(raw).strip().upper()
+    if not s:
+        return None
+
+    # 空格转连接号后再匹配: ABW 005 -> ABW-005
+    norm = re.sub(r"\s+", "-", s)
+    m = re.search(r"([A-Za-z]{2,6}-?\d{2,7})", norm)
+    if m:
+        return m.group(1)
+
+    # FC2 格式: FC2-1234567
+    m = re.search(r"(FC2-\d{4,7})", s)
+    if m:
+        return m.group(1)
+
+    # 1Pondo 格式: 010116 220 / 010116_220
+    m = re.search(r"(\d{6})[ _](\d{2,3})", s)
+    if m:
+        return m.group(1) + "_" + m.group(2)
+
+    # 纯6位数字（兜底）
+    m = re.search(r"(\d{6})", s)
+    if m:
+        return m.group(1)
+
+    return None
+
+
+# ══════════════════════════════════════════════════════════════
+# 元数据构建
+# ══════════════════════════════════════════════════════════════
 
 def _build_metadata(data: dict) -> dict:
     number = data.get("number", "")
